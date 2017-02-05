@@ -129,7 +129,7 @@ if __name__ == '__main__':
     
     mode = None
     if args.stream_only:
-        mode = VisionMode.stream-only
+        mode = VisionMode.CSCORE_STREAM_ONLY
     if args.cv_stream:
         if mode is not None:
             raise 'Multiple modes set please use only \'-i\', \'-s\', or \'-cv\''
