@@ -145,8 +145,6 @@ if __name__ == '__main__':
         
     if mode is None:
         raise 'No vision mode set!'
-    
-    
         
     vision = VictisVision(mode=mode,
                           nt_address=args.nt_address,

@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import math
 
 from networktables import NetworkTable
 from networktables.util import ntproperty
@@ -15,8 +16,8 @@ class ImageProcessor:
     BLUE = (255, 0, 0)
     GREEN = (0, 255, 0)
     
-    min_width = ntproperty('/camera/min_width', 5)
-    min_height = ntproperty('/camera/min_height', 10)
+    min_width = ntproperty('/camera/min_width', 2)
+    min_height = ntproperty('/camera/min_height', 2)
     
     thresh_hue_lower = ntproperty('/camera/thresholds/hue_low', 60)
     thresh_hue_high = ntproperty('/camera/thresholds/hue_high', 100)
@@ -88,7 +89,7 @@ class ImageProcessor:
         
         _, contours, _ = cv2.findContours(thresh_img, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
         result = []
-        
+        #print("Len: ", len(contours))
         for cnt in contours:
             approx = cv2.approxPolyDP(cnt,0.01*cv2.arcLength(cnt,True),True)
             
@@ -114,7 +115,7 @@ class ImageProcessor:
                             
                             if self.draw_contours:
                                 cv2.drawContours(self.out, [approx], -1, self.YELLOW, 2, lineType=8)'''
-                    
+        #print("Len: ", len(result))         
         return result
     
     def get_contour_info(self, contour):
@@ -129,87 +130,84 @@ class ImageProcessor:
     
     def process_for_gear_target(self, contours):
         # Filter contours for complete gear targets and possible 'broken gear targets'
-        self.targets = {'complete':[], 'broken':[]}
+        self.targets = []
         
         for c in contours:
             target_info = self.get_contour_info(c)
             target_info['cnt'] = c
             
-            # Check for square-ish blobs (might indecate broken gear target)
-            if target_info['w'] >= (target_info['h'] - self.square_tolerance) and target_info['w'] <= (target_info['h'] + self.square_tolerance):
-                self.targets['broken'].append(target_info)
-            elif target_info['w'] < target_info['h']:
-                self.targets['complete'].append(target_info)
-        
+            self.targets.append(target_info)
+            
+        self.full_targets = []
         # Groups contours together if within a certain tolerance
-        for i, b in enumerate(self.targets['broken'][:]):
-            
-            if len(self.targets['broken']) == 0:
-                break
-            
-            for b2 in self.targets['broken'][i+1:]:
+        for i, b in enumerate(self.targets[:]):
+            matched = False
+            for i2, b2 in enumerate(self.targets[i+1:]):
                 if b['cx'] >= b2['cx'] - self.broken_tolerance_x and b['cx'] <= b2['cx'] + self.broken_tolerance_x:
-                    if b['cy'] >= b2['cy'] - self.broken_tolerance_y and b['cy'] <= b2['cy'] + self.broken_tolerance_y:
-                        new_blob = np.concatenate([b['cnt'], b2['cnt']])
-                        
-                        hull = cv2.convexHull(new_blob)
-                        new_blob = cv2.approxPolyDP(hull,0.01*cv2.arcLength(hull,True),True)
-                        
-                        target_info = self.get_contour_info(new_blob)
-                        target_info['cnt'] = new_blob
-                        
-                        self.targets['complete'].append(target_info)
-                        
-                        self.targets['broken'] = {}
-                        
-                        break
+                    matched = True
+                    new_blob = np.concatenate([b['cnt'], b2['cnt']])
+                    
+                    hull = cv2.convexHull(new_blob)
+                    new_blob = cv2.approxPolyDP(hull,0.01*cv2.arcLength(hull,True),True)
+                    
+                    target_info = self.get_contour_info(new_blob)
+                    target_info['cnt'] = new_blob
+                    
+                    self.full_targets.append(target_info)
+                    self.targets.remove(b)
+                    
+                    break
+            if not matched:
+                self.full_targets.append(b)
         
         # Draws gears after `patching` them together 
         if self.draw_gear_patch:
             contours = []
-            for g in self.targets['complete']:
+            for g in self.full_targets:
                 cv2.drawContours(self.out, [g['cnt']], -1, self.YELLOW, 2, lineType=8)
                 contours.append(g['cnt'])
         
         # Breaks out of loop if no complete targets
-        if len(self.targets['complete']) == 0:
+        if len(self.full_targets) == 0:
             self.nt.putBoolean('gear_target_present', False)
-            return
+            return out
         
         # Finds the target that is closest to the center
         h = float(self.size[0])
         w = float(self.size[1])
         
-        center_most_target = None
-        for i, g in enumerate(self.targets['complete'][:]):
+        primary_target = None
+        for i, g in enumerate(self.full_targets[:]):
             greater_than = True
             
-            for g2 in self.targets['complete'][i:]:
+            for g2 in self.full_targets[i+1:]:
                 if g['cx'] - (h / 2) < g2['cx'] - (h / 2):
                     greater_than = False
             
             if greater_than:
-                center_most_target = g
-                self.targets['complete'].remove(g)
+                primary_target = g
+                self.full_targets.remove(g)
                 break
         
         
         # Finds the another close gear target if present
-        main_target_contour = center_most_target['cnt']
+        main_target_contour = primary_target['cnt']
+        secondary_target = None
         partial = True
-        if len(self.targets['complete']) > 0:
-            for i, g in enumerate(self.targets['complete']):
+        if len(self.full_targets) > 0:
+            for i, g in enumerate(self.full_targets):
                 greater_than = True
                 
-                if abs(g['cx'] - center_most_target['cx']) < self.gear_spacing * center_most_target['h']:
+                if abs(g['cx'] - primary_target['cx']) < self.gear_spacing * primary_target['h']:
                     
-                    for g2 in self.targets['complete'][i:]:
+                    for g2 in self.full_targets[i:]:
                         if g['cx'] - (h / 2) < g2['cx'] - (h / 2):
                             greater_than = False
                 else:
                     greater_than = False
                 
                 if greater_than:
+                    secondary_target = self.get_contour_info(g['cnt'])
                     main_target_contour = np.concatenate([g['cnt'],main_target_contour])
                     partial = False
                     break
@@ -218,13 +216,41 @@ class ImageProcessor:
         hull = cv2.convexHull(main_target_contour)
         main_target_contour = cv2.approxPolyDP(hull,0.01*cv2.arcLength(hull,True),True)
         
-        cnt_info = self.get_contour_info(main_target_contour)
+        #r = cv2.minAreaRect(main_target_contour)
+        #print(r)
         
+        cnt_info = self.get_contour_info(main_target_contour)
+        #print('target c')
         angle = self.VFOV * target_info['cy'] / h - self.VFOV/2.0
+        #print('Angle %s' % angle)
         height = self.HFOV * target_info['cx'] / w - self.HFOV/2.0
+        #print('Height %s' % height)
         
         self.nt.putBoolean('gear_target_present', True)
         self.nt.putBoolean('gear_target_partial', partial)
+        
+        if not partial:
+            skew = 0
+            if primary_target['h'] < secondary_target['h']:
+                skew = secondary_target['h']/primary_target['h']
+                skew -= 1
+                if primary_target['cx'] < secondary_target['cx']:
+                    skew *= -1
+            else:
+                skew = primary_target['h']/secondary_target['h']
+                skew -= 1
+                if secondary_target['cx'] < primary_target['cx']:
+                    skew *= -1
+            #skew = math.pow((primary_target['h']/secondary_target['h']), -2)
+            '''
+            if primary_target['cx'] > secondary_target['cx']:
+                displacement = secondary_target['h'] - primary_target['h']
+            else:
+                displacement = primary_target['h'] - secondary_target['h']
+                '''
+            #print("Skew %s" % skew)    
+            self.nt.putNumber('gear_target_skew', skew)
+            
         self.nt.putNumber('gear_target_angle', angle)
         self.nt.putNumber('gear_target_height', height)
         
