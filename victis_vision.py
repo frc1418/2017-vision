@@ -89,7 +89,7 @@ class VictisVision:
                     self.cvSource.putFrame(img)
                     continue
                 
-                out = self.processor.process_frame(img)
+                out = self.processor.process_frame(img, time)
                 
                 self.cvSource.putFrame(out)
                 
@@ -148,9 +148,9 @@ if __name__ == '__main__':
         
     vision = VictisVision(mode=mode,
                           nt_address=args.nt_address,
-                          camera_port=args.camera_port,
-                          stream_port=args.stream_port,
+                          camera_port=int(args.camera_port),
+                          stream_port=int(args.stream_port),
                           stream_cv=args.stream_cv,
-                          cv_stream_port=args.cvstream_port,
+                          cv_stream_port=int(args.cvstream_port),
                           photo_path=args.photo_path)
     

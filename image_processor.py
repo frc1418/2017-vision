@@ -46,6 +46,10 @@ class ImageProcessor:
         
         self.nt = NetworkTable.getTable('/camera')
         
+        #self.target = NumberArray()
+        #self.nt.putValue('target', self.target)
+        
+        
     def preallocate(self, img):
         if self.size is None or self.size[0] != img.shape[0] or self.size[1] != img.shape[1]:
             h, w = img.shape[:2]
@@ -128,7 +132,7 @@ class ImageProcessor:
         
         return contour_info
     
-    def process_for_gear_target(self, contours):
+    def process_for_gear_target(self, contours, time):
         # Filter contours for complete gear targets and possible 'broken gear targets'
         self.targets = []
         
@@ -170,7 +174,7 @@ class ImageProcessor:
         # Breaks out of loop if no complete targets
         if len(self.full_targets) == 0:
             self.nt.putBoolean('gear_target_present', False)
-            return out
+            return self.out
         
         # Finds the target that is closest to the center
         h = float(self.size[0])
@@ -221,10 +225,10 @@ class ImageProcessor:
         
         cnt_info = self.get_contour_info(main_target_contour)
         #print('target c')
-        angle = self.VFOV * target_info['cy'] / h - self.VFOV/2.0
-        #print('Angle %s' % angle)
-        height = self.HFOV * target_info['cx'] / w - self.HFOV/2.0
-        #print('Height %s' % height)
+        height = self.VFOV * target_info['cy'] / h - self.VFOV/2.0
+        angle = self.HFOV * target_info['cx'] / w - self.HFOV/2.0
+        print('Height %s' % height)
+        print('Angle %s' % angle)
         
         self.nt.putBoolean('gear_target_present', True)
         self.nt.putBoolean('gear_target_partial', partial)
@@ -248,7 +252,7 @@ class ImageProcessor:
             else:
                 displacement = primary_target['h'] - secondary_target['h']
                 '''
-            #print("Skew %s" % skew)    
+            print("Skew %s" % skew)    
             self.nt.putNumber('gear_target_skew', skew)
             
         self.nt.putNumber('gear_target_angle', angle)
@@ -256,13 +260,20 @@ class ImageProcessor:
         
         if self.draw_gear_target:
             cv2.drawContours(self.out, [main_target_contour], -1, self.RED, 2, lineType=8)
+            
+        #self.target.clear()
+        
+        #self.target += [angle, skew, time]
+        
+        #self.nt.putValue('target', self.target)
+
     
-    def process_frame(self, frame):
+    def process_frame(self, frame, time):
         self.preallocate(frame)
         
         cnt = self.find_contours(frame)
         
-        self.process_for_gear_target(cnt)
+        self.process_for_gear_target(cnt, time)
             
         return self.out
         
